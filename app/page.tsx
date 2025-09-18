@@ -7,8 +7,6 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { useToast } from "@/hooks/use-toast"
 import { Loader2 } from "lucide-react"
-import { RecaptchaVerifier, signInWithPhoneNumber } from "firebase/auth"
-import { auth } from "@/lib/firebase"  // ✅ make sure you create this file
 
 const SOUTH_INDIAN_STATES = ["Tamil Nadu", "Kerala", "Karnataka", "Andhra Pradesh", "Telangana"]
 
@@ -129,29 +127,53 @@ export default function DynamicLoginPage() {
         toast({ title: "Invalid Email", description: "Enter valid email.", variant: "destructive" })
         return
       }
+
       const otp = Math.floor(1000 + Math.random() * 9000).toString()
       setGeneratedOtp(otp)
       setShowOtpInput(true)
-      setOtpCountdown(30)
-      toast({ title: "OTP Sent", description: `An OTP was sent to email: ${otpTarget}` })
+      setOtpCountdown(300) // 5 minutes
+
+      try {
+        // ✅ Call backend API to send email
+        await fetch("/api/send-email-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: otpTarget, otp }),
+        })
+
+        toast({ title: "OTP Sent", description: `An OTP was sent to email: ${otpTarget}` })
+      } catch (error) {
+        toast({ title: "Email Error", description: "Failed to send OTP email.", variant: "destructive" })
+      }
+
       console.log("Email OTP:", otp)
     } else {
+      // 📱 Mobile OTP using Twilio API
       if (!otpTarget.startsWith("+91")) {
         toast({ title: "Invalid Mobile", description: "Use format: +91XXXXXXXXXX", variant: "destructive" })
         return
       }
+
       try {
-        if (!(window as any).recaptchaVerifier) {
-          (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, "recaptcha-container", {
-            size: "invisible",
-          })
-        }
-        const appVerifier = (window as any).recaptchaVerifier
-        const confirmationResult = await signInWithPhoneNumber(auth, otpTarget, appVerifier)
-        ;(window as any).confirmationResult = confirmationResult
+        const otp = Math.floor(1000 + Math.random() * 9000).toString()
+        setGeneratedOtp(otp)
         setShowOtpInput(true)
-        setOtpCountdown(60)
-        toast({ title: "OTP Sent", description: `An OTP was sent to mobile: ${otpTarget}` })
+        setOtpCountdown(300) // 5 minutes
+
+        const response = await fetch("/api/sms-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ phone: otpTarget, otp }),
+        })
+
+        const data = await response.json()
+
+        if (data.success) {
+          toast({ title: "OTP Sent", description: `An OTP was sent to mobile: ${otpTarget}` })
+          //console.log("SMS OTP:", otp)
+        } else {
+          toast({ title: "SMS Error", description: data.error || "Failed to send OTP", variant: "destructive" })
+        }
       } catch (error: any) {
         toast({ title: "SMS Error", description: error.message, variant: "destructive" })
       }
@@ -173,13 +195,10 @@ export default function DynamicLoginPage() {
         toast({ title: "Invalid OTP", description: "Wrong OTP entered.", variant: "destructive" })
       }
     } else {
-      try {
-        const result = await (window as any).confirmationResult.confirm(otpCode)
-        if (result.user) {
-          setIsLoggedIn(true)
-          toast({ title: "Login Successful", description: "Welcome!" })
-        }
-      } catch {
+      if (otpCode === generatedOtp) {
+        setIsLoggedIn(true)
+        toast({ title: "Login Successful", description: "Welcome!" })
+      } else {
         toast({ title: "Invalid OTP", description: "Wrong OTP entered.", variant: "destructive" })
       }
     }
@@ -219,7 +238,7 @@ export default function DynamicLoginPage() {
         <Card className="w-full max-w-2xl">
           <CardContent className="text-center p-8 space-y-6">
             <h1 className="text-4xl font-bold text-primary">Welcome!</h1>
-            <p className="text-lg text-muted-foreground">You have successfully logged in.</p>
+            <p className="text-lg text-muted-foreground">You have successfully logged in from {locationData.state} and your theme is {locationData.theme}.</p>
             <Button onClick={handleLogout} size="lg">Logout</Button>
           </CardContent>
         </Card>
@@ -277,9 +296,6 @@ export default function DynamicLoginPage() {
               />
             </div>
           )}
-
-          {/* reCAPTCHA container (only used for mobile OTP) */}
-          {locationData.otpMethod === "mobile" && <div id="recaptcha-container"></div>}
 
           <Button onClick={handleLogin} className="w-full">Login</Button>
 
